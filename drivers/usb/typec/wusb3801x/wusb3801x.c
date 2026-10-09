@@ -397,7 +397,7 @@ typedef struct wusb3801_data
 }wusb3801_data_t;
 #ifdef  __WITH_KERNEL_VER4__
 struct wusb3801_wakeup_source {
-        struct wakeup_source    source;
+        struct wakeup_source    *source;
         unsigned long           enabled_bitmap;
         spinlock_t              ws_lock;
 };
@@ -659,7 +659,7 @@ static void wusb3801_stay_awake(struct wusb3801_wakeup_source *source,
         unsigned long flags;
         spin_lock_irqsave(&source->ws_lock, flags);
         if (!__test_and_set_bit(wk_src, &source->enabled_bitmap))
-                __pm_stay_awake(&source->source);
+                __pm_stay_awake(source->source);
         spin_unlock_irqrestore(&source->ws_lock, flags);
 }
 static void wusb3801_relax(struct wusb3801_wakeup_source *source,
@@ -669,7 +669,7 @@ static void wusb3801_relax(struct wusb3801_wakeup_source *source,
         spin_lock_irqsave(&source->ws_lock, flags);
         if (__test_and_clear_bit(wk_src, &source->enabled_bitmap) &&
                 !(source->enabled_bitmap & WAKEUP_SRC_MASK)) {
-                __pm_relax(&source->source);
+                __pm_relax(source->source);
         }
         spin_unlock_irqrestore(&source->ws_lock, flags);
 }
@@ -677,10 +677,13 @@ static void wusb3801_relax(struct wusb3801_wakeup_source *source,
 static void wusb3801_wakeup_src_init(struct wusb3801_chip *chip)
 {
         spin_lock_init(&chip->wusb3801_ws.ws_lock);
-        //wakeup_source_init(&chip->wusb3801_ws.source, "wusb3801");
-	wakeup_source_create("wusb3801");
-	wakeup_source_add(&chip->wusb3801_ws.source);
-	pr_info("wusb3801 wake up init success!\n");       // 20211021 ruichoauqn add
+        chip->wusb3801_ws.source = wakeup_source_create("wusb3801");
+        if (chip->wusb3801_ws.source) {
+                wakeup_source_add(chip->wusb3801_ws.source);
+                pr_info("wusb3801 wake up init success!\n");
+        } else {
+                pr_err("wusb3801 failed to init wakeup source!\n");
+        }
 }
 #endif /* __WITH_KERNEL_VER4__ */
 
@@ -2160,7 +2163,7 @@ static irqreturn_t wusb3801_interrupt(int irq, void *data)
 {
 	struct wusb3801_chip *chip = (struct wusb3801_chip *)data;
 	if (!chip) {
-		dev_err(&chip->client->dev, "%s : called before init.\n", __func__);
+		pr_err("%s: called before init.\n", __func__);
 		return IRQ_HANDLED;
 	}
 	disable_irq_nosync(irq);
@@ -2170,7 +2173,7 @@ static irqreturn_t wusb3801_interrupt(int irq, void *data)
 	 * before charger gets chance to trigger usb core for device
 	 */
 #ifdef __WITH_KERNEL_VER4__
-	__pm_wakeup_event(&chip->wusb3801_ws.source, WUSB3801_WAKE_LOCK_TIMEOUT);
+        __pm_wakeup_event(chip->wusb3801_ws.source, WUSB3801_WAKE_LOCK_TIMEOUT);
 #else /* __WITH_KERNEL_VER4__ */	
 	wake_lock_timeout(&chip->wlock,
 				msecs_to_jiffies(WUSB3801_WAKE_LOCK_TIMEOUT));
