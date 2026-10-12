@@ -1395,15 +1395,13 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 	if (bTouchIsAwake == 0) {
 		pm_wakeup_event(&ts->input_dev->dev, 5000);
 	}
-#ifdef CONFIG_PM
-	if (ts->dev_pm_suspend && ts->is_gesture_mode) {
+	if (ts->dev_pm_suspend && ts->is_gesture_mode && bTouchIsAwake) {
 		ret = wait_for_completion_timeout(&ts->dev_pm_suspend_completion, msecs_to_jiffies(700));
 		if (!ret) {
 			NVT_ERR("system(spi bus) can't finished resuming procedure, skip it");
 			return IRQ_HANDLED;
 		}
 	}
-#endif
 #endif
 
 	mutex_lock(&ts->lock);
@@ -1763,7 +1761,7 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 #endif
 
 	NVT_LOG("start\n");
-  	spi_geni_master_dev = NULL;
+  	spi_geni_master_dev = &client->master->dev;
 
 	ts = (struct nvt_ts_data *)kzalloc(sizeof(struct nvt_ts_data), GFP_KERNEL);
 	if (ts == NULL) {
@@ -2093,8 +2091,6 @@ static int32_t nvt_ts_probe(struct spi_device *client)
 	init_completion(&ts->dev_pm_suspend_completion);
 #endif
 
-	pm_runtime_enable(&ts->client->dev);
-
 //2019.12.06 longcheer taocheng add for charger mode
 #if NVT_USB_PLUGIN
 	g_touchscreen_usb_pulgin.event_callback = nvt_ts_usb_event_callback;
@@ -2383,6 +2379,9 @@ static int32_t nvt_ts_suspend(struct device *dev)
 
 	bTouchIsAwake = 0;
 
+	ts->dev_pm_suspend = true;
+	reinit_completion(&ts->dev_pm_suspend_completion);
+
 #if WAKEUP_GESTURE
 	if (ts->is_gesture_mode) {
 	//---write command to enter "wakeup gesture mode"---
@@ -2496,6 +2495,9 @@ static int32_t nvt_ts_resume(struct device *dev)
 #endif /* #if NVT_TOUCH_ESD_PROTECT */
 
 	bTouchIsAwake = 1;
+
+	ts->dev_pm_suspend = false;
+	complete(&ts->dev_pm_suspend_completion);
 
 	mutex_unlock(&ts->lock);
 
@@ -2636,34 +2638,6 @@ static void nvt_ts_late_resume(struct early_suspend *h)
 }
 #endif
 
-#ifdef CONFIG_PM
-static int nvt_pm_suspend(struct device *dev)
-{
-	struct nvt_ts_data *ts = dev_get_drvdata(dev);
-
-	ts->dev_pm_suspend = true;
-	reinit_completion(&ts->dev_pm_suspend_completion);
-	NVT_LOG("pm suspend");
-
-	return 0;
-}
-
-static int nvt_pm_resume(struct device *dev)
-{
-	struct nvt_ts_data *ts = dev_get_drvdata(dev);
-
-	ts->dev_pm_suspend = false;
-	complete(&ts->dev_pm_suspend_completion);
-	NVT_LOG("pm resume");
-
-	return 0;
-}
-
-static const struct dev_pm_ops nvt_dev_pm_ops = {
-	.suspend = nvt_pm_suspend,
-	.resume = nvt_pm_resume,
-};
-#endif
 static const struct spi_device_id nvt_ts_id[] = {
 	{ NVT_SPI_NAME, 0 },
 	{ }
@@ -2684,9 +2658,6 @@ static struct spi_driver nvt_spi_driver = {
 	.driver = {
 		.name	= NVT_SPI_NAME,
 		.owner	= THIS_MODULE,
-#ifdef CONFIG_PM
-		.pm = &nvt_dev_pm_ops,
-#endif
 #ifdef CONFIG_OF
 		.of_match_table = nvt_match_table,
 #endif
