@@ -1308,6 +1308,7 @@ static enum power_supply_property smb1351_battery_properties[] = {
 	POWER_SUPPLY_PROP_CURRENT_NOW,
 	POWER_SUPPLY_PROP_VOLTAGE_NOW,
 	POWER_SUPPLY_PROP_INPUT_SUSPEND,
+	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX,
 };
 
 static int smb1351_get_current_now(struct smb1351_charger *chip)
@@ -1720,6 +1721,7 @@ static int smb1351_batt_property_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_BATTERY_CHARGING_ENABLED:
 	case POWER_SUPPLY_PROP_CAPACITY:
 	case POWER_SUPPLY_PROP_INPUT_SUSPEND:
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
 		return 1;
 	default:
 		break;
@@ -1784,6 +1786,10 @@ static int smb1351_battery_set_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_INPUT_SUSPEND:
 		smb1351_usb_suspend(chip, USER, val->intval);
 		break;
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
+		chip->target_fastchg_current_max_ma = val->intval / 1000;
+		rc = smb1351_fastchg_current_set(chip, chip->target_fastchg_current_max_ma);
+		break;
 	default:
 		return -EINVAL;
 	}
@@ -1836,6 +1842,9 @@ static int smb1351_battery_get_property(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_INPUT_SUSPEND:
 		val->intval = chip->parallel_charger_suspended;
+		break;
+	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT_MAX:
+		val->intval = chip->fastchg_current_max_ma * 1000;
 		break;
 	default:
 		return -EINVAL;
