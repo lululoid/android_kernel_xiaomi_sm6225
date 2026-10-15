@@ -1148,6 +1148,19 @@ static int32_t nvt_parse_dt(struct device *dev)
 		NVT_LOG("SPI_RD_FAST_ADDR=0x%06X\n", SPI_RD_FAST_ADDR);
 	}
 
+	/* read display coords from DT (focaltech,display-coords = <x_min y_min x_max y_max>) */
+	{
+		u32 coords[4];
+		ret = of_property_read_u32_array(np, "focaltech,display-coords", coords, 4);
+		if (ret == 0) {
+			ts->abs_x_max = coords[2] + 1; /* max is inclusive, so add 1 for validation */
+			ts->abs_y_max = coords[3] + 1;
+			NVT_LOG("display-coords from DT: x_max=%d, y_max=%d\n", ts->abs_x_max, ts->abs_y_max);
+		} else {
+			NVT_LOG("focaltech,display-coords not found in DT, using defaults\n");
+		}
+	}
+
 	return ret;
 }
 #else
@@ -1476,7 +1489,8 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 			input_y = (uint32_t)(point_data[position + 2] << 4) + (uint32_t) (point_data[position + 3] & 0x0F);
 			if ((input_x < 0) || (input_y < 0))
 				continue;
-			if ((input_x > ts->abs_x_max) || (input_y > ts->abs_y_max))
+			/* validate against max (inclusive). Input device max is ts->abs_x_max - 1 */
+			if ((input_x >= ts->abs_x_max) || (input_y >= ts->abs_y_max))
 				continue;
 			input_w = (uint32_t)(point_data[position + 4]);
 			if (input_w == 0)
