@@ -45,6 +45,7 @@
 				qcom,batt-warm-mv = <0x1068>;
 				qcom,batt-cool-mv = <0x1068>;
 				enable_sw_jeita;
+				qcom,hvdcp-disable;
 				normal-charge-voltage = <0x116c>;
 				jeita_temp_above_t4_cv = <0x1004>;
 				jeita_temp_t3_to_t4_cv = <0x1004>;
@@ -131,7 +132,7 @@
 				pinctrl-0 = <&wusb3801_active>;
 				pinctrl-1 = <&wusb3801_suspend>;
 				wusb3801,init-mode = <0x24>;
-				wusb3801,host-current = <0x01>;
+				wusb3801,host-current = <0x02>;
 				wusb3801,drp-toggle-time = <0x28>;
 			};
 
