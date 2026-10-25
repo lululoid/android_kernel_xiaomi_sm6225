@@ -43,6 +43,12 @@ const struct firmware *fw_entry = NULL;
 static size_t fw_need_write_size = 0;
 static uint8_t *fwbuf = NULL;
 
+/* Serializes nvt_update_firmware() to prevent concurrent access to
+ * globals fwbuf/bin_map/partition from multiple callers (resume, ESD timer,
+ * IRQ WDT recovery). SPI transfers now time out, so holding this mutex is
+ * bounded and won't deadlock the IRQ thread. */
+static DEFINE_MUTEX(nvt_fw_update_mutex);
+
 struct nvt_ts_bin_map {
 	char name[12];
 	uint32_t BIN_addr;
@@ -991,6 +997,8 @@ int32_t nvt_update_firmware(char *firmware_name)
 {
 	int32_t ret = 0;
 
+	mutex_lock(&nvt_fw_update_mutex);
+
 	// request bin file in "/etc/firmware"
 	ret = update_firmware_request(firmware_name);
 	if (ret) {
@@ -1032,6 +1040,8 @@ download_fail:
 
 	update_firmware_release();
 request_firmware_fail:
+
+	mutex_unlock(&nvt_fw_update_mutex);
 
 	return ret;
 }

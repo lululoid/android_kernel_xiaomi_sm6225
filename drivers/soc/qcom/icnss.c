@@ -4024,6 +4024,10 @@ static int icnss_pm_suspend_noirq(struct device *dev)
 		goto out;
 
 	ret = priv->ops->suspend_noirq(dev);
+	if (ret == -EAGAIN) {
+		icnss_pr_warn("suspend_noirq returned -EAGAIN, treating as success to avoid PM retry loop\n");
+		ret = 0;
+	}
 
 out:
 	if (ret == 0) {

@@ -264,12 +264,19 @@ Description:
 return:
 	Executive outcomes. 0---succeed.
 *******************************************************/
+/* SPI async transfer completion callback */
+static void nvt_spi_complete(void *arg)
+{
+	complete(arg);
+}
+
 static inline int32_t spi_read_write(struct spi_device *client, uint8_t *buf, size_t len , NVT_SPI_RW rw)
 {
 	struct spi_message m;
 	struct spi_transfer t = {
 		.len    = len,
 	};
+	struct completion completion;
 
 	memset(ts->xbuf, 0, len + DUMMY_BYTES);
 	memcpy(ts->xbuf, buf, len);
@@ -288,7 +295,19 @@ static inline int32_t spi_read_write(struct spi_device *client, uint8_t *buf, si
 
 	spi_message_init(&m);
 	spi_message_add_tail(&t, &m);
-	return spi_sync(client, &m);
+	init_completion(&completion);
+	m.context = &completion;
+	m.complete = nvt_spi_complete;
+	/* Use async transfer with timeout to prevent indefinite blocking on unresponsive SPI */
+	if (spi_async(client, &m) < 0) {
+		NVT_ERR("SPI async submit failed\n");
+		return -EIO;
+	}
+	if (!wait_for_completion_timeout(&completion, msecs_to_jiffies(1000))) {
+		NVT_ERR("SPI transfer timeout, len=%zu\n", len);
+		return -ETIMEDOUT;
+	}
+	return m.status < 0 ? m.status : 0;
 }
 
 /*******************************************************
@@ -1253,11 +1272,9 @@ static void nvt_esd_check_func(struct work_struct *work)
 	//NVT_LOG("esd_check = %d (retry %d)\n", esd_check, esd_retry);	//DEBUG
 
 	if ((timer > NVT_TOUCH_ESD_CHECK_PERIOD) && esd_check) {
-		mutex_lock(&ts->lock);
 		NVT_ERR("do ESD recovery, timer = %d, retry = %d\n", timer, esd_retry);
 		/* do esd recovery, reload fw */
 		nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
-		mutex_unlock(&ts->lock);
 		/* update interrupt timer */
 		irq_timer = jiffies;
 		/* update esd_retry counter */
@@ -1427,7 +1444,9 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
    /* ESD protect by WDT */
    if (nvt_wdt_fw_recovery(point_data)) {
        NVT_ERR("Recover for fw reset, %02X\n", point_data[1]);
+       mutex_unlock(&ts->lock);
        nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
+       mutex_lock(&ts->lock);
        goto XFER_ERROR;
    }
 #endif /* #if NVT_TOUCH_WDT_RECOVERY */
@@ -2354,18 +2373,16 @@ static int32_t nvt_ts_suspend(struct device *dev)
 
 #if WAKEUP_GESTURE
     set_lcd_reset_gpio_keep_high(true);
-	if (!ts->is_gesture_mode) {
-		nvt_irq_enable(false);
-          	NVT_LOG("NVT_IRQ_FALSE\n");
-		//spi bus pm_runtime_get
-		if (spi_geni_master_dev) {
-			if (pm_runtime_put(spi_geni_master_dev))
-				NVT_ERR("pm_runtime_put fail!\n");
-		}
-	}
+    if (!ts->is_gesture_mode) {
+        nvt_irq_enable(false);
+            NVT_LOG("NVT_IRQ_FALSE\n");
+        // SPI master runtime PM is managed by the SPI subsystem,
+        // not by the touch driver, to avoid conflicts during
+        // rapid system suspend/resume cycles.
+    }
 #else
-	nvt_irq_enable(false);
-#endif
+    nvt_irq_enable(false);
+#endif /* #if WAKEUP_GESTURE */
 
 #if NVT_TOUCH_ESD_PROTECT
 	NVT_LOG("cancel delayed work sync\n");
@@ -2467,26 +2484,35 @@ static int32_t nvt_ts_resume(struct device *dev)
 #if NVT_TOUCH_SUPPORT_HW_RST
 	gpio_set_value(ts->reset_gpio, 1);
 #endif
+
+	/* Release ts->lock during blocking firmware update so other callers
+	 * (IRQ thread, suspend) are not blocked if the touch controller is
+	 * unresponsive. nvt_update_firmware uses ts->xbuf_lock internally for
+	 * SPI serialization and does not touch ts->lock-protected state. */
+	mutex_unlock(&ts->lock);
 	if (nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME)) {
 		NVT_ERR("download firmware failed, ignore check fw state\n");
 	} else {
 		nvt_check_fw_reset_state(RESET_STATE_REK);
 	}
+	mutex_lock(&ts->lock);
 
 #if WAKEUP_GESTURE
 	if (!ts->is_gesture_mode) {
 		nvt_irq_enable(true);
-          	NVT_LOG("NVT_IRQ_TURE\n");
-		//spi bus pm_runtime_get
-		if (spi_geni_master_dev) {
-			if (pm_runtime_get(spi_geni_master_dev)){
-				NVT_ERR("pm_runtime_get fail!\n");
-                        }
-		}
+           	NVT_LOG("NVT_IRQ_TURE\n");
+		// SPI master runtime PM is managed by the SPI subsystem,
+		// not by the touch driver, to avoid conflicts during
+		// rapid system suspend/resume cycles.
 	}
 #else
 	nvt_irq_enable(true);
 #endif
+
+	/* Keep system awake briefly after touch resume to prevent
+	 * immediate re-suspend from unrelated wakeup sources (e.g. WLAN IRQ),
+	 * which can cause rapid suspend/resume loops and kernel panic. */
+	pm_wakeup_event(&ts->input_dev->dev, 5000);
 
 #if NVT_TOUCH_ESD_PROTECT
 	nvt_esd_check_enable(false);
@@ -2541,13 +2567,13 @@ static int nvt_drm_panel_notifier_callback(struct notifier_block *self, unsigned
 		if (event == DRM_PANEL_EARLY_EVENT_BLANK) {
 			if (*blank == DRM_PANEL_BLANK_POWERDOWN) {
 				NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
-				flush_workqueue(ts->event_wq);
+				
 				queue_work(ts->event_wq, &ts->suspend_work);
 			}
 		} else if (event == DRM_PANEL_EVENT_BLANK) {
 			if (*blank == DRM_PANEL_BLANK_UNBLANK) {
 				NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
-				flush_workqueue(ts->event_wq);
+				
 				queue_work(ts->event_wq, &ts->resume_work);
 			}
 		}
@@ -2571,13 +2597,13 @@ static int nvt_drm_notifier_callback(struct notifier_block *self, unsigned long 
 		if (event == MSM_DRM_EARLY_EVENT_BLANK) {
 			if (*blank == MSM_DRM_BLANK_POWERDOWN) {
 				NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
-				flush_workqueue(ts->event_wq);
+				
 				queue_work(ts->event_wq, &ts->suspend_work);
 			}
 		} else if (event == MSM_DRM_EVENT_BLANK) {
 			if (*blank == MSM_DRM_BLANK_UNBLANK) {
 				NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
-				flush_workqueue(ts->event_wq);
+				
 				queue_work(ts->event_wq, &ts->resume_work);
 			}
 		}
@@ -2597,14 +2623,14 @@ static int nvt_fb_notifier_callback(struct notifier_block *self, unsigned long e
 		blank = evdata->data;
 		if (*blank == FB_BLANK_POWERDOWN) {
 			NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
-			flush_workqueue(ts->event_wq);
+			
 			queue_work(ts->event_wq, &ts->suspend_work);
 		}
 	} else if (evdata && evdata->data && event == FB_EVENT_BLANK) {
 		blank = evdata->data;
 		if (*blank == FB_BLANK_UNBLANK) {
 			NVT_LOG("event=%lu, *blank=%d\n", event, *blank);
-			flush_workqueue(ts->event_wq);
+			
 			queue_work(ts->event_wq, &ts->resume_work);
 		}
 	}
