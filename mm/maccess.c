@@ -202,6 +202,7 @@ long copy_to_user_nofault(void __user *dst, const void *src, size_t size)
 	return 0;
 }
 EXPORT_SYMBOL_GPL(copy_to_user_nofault);
+EXPORT_SYMBOL_GPL(copy_to_kernel_nofault);
 
 /**
  * strncpy_from_kernel_nofault: - Copy a NUL terminated string from unsafe
