@@ -17,6 +17,11 @@
 #include <linux/syscalls.h>
 #include <linux/pagemap.h>
 #include <linux/compat.h>
+#ifdef CONFIG_KSU
+__attribute__((hot))
+extern int ksu_handle_stat(int *dfd, const char __user **filename_user,
+				int *flags);
+#endif
 
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
@@ -359,6 +364,10 @@ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 {
 	struct kstat stat;
 	int error;
+
+#ifdef CONFIG_KSU
+	ksu_handle_stat(&dfd, &filename, &flag);
+#endif
 
 	error = vfs_fstatat(dfd, filename, &stat, flag);
 	if (error)
