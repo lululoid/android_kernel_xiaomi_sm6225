@@ -996,8 +996,20 @@ return:
 int32_t nvt_update_firmware(char *firmware_name)
 {
 	int32_t ret = 0;
+	uint8_t spi_test_buf[1] = {0};
 
 	mutex_lock(&nvt_fw_update_mutex);
+
+	/* Check SPI responsiveness before attempting firmware download.
+	 * If the touch controller is unresponsive (ESD/hard reset), skip
+	 * the firmware update to avoid crashing on invalid memory access
+	 * when SPI transfers time out during the download. */
+	ret = CTP_SPI_READ(ts->client, spi_test_buf, 1);
+	if (ret < 0) {
+		NVT_ERR("SPI not responsive, skip firmware update\n");
+		ret = -EIO;
+		goto request_firmware_fail;
+	}
 
 	// request bin file in "/etc/firmware"
 	ret = update_firmware_request(firmware_name);
