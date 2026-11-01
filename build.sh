@@ -1,18 +1,35 @@
 #CONFIGURATION
-defconfig_path=arch/arm64/configs/vendor/fog_defconfig # Must be edited
-defconfig=vendor/fog_defconfig # Must be edited
+DEFCONFIG_PATH=arch/arm64/configs/vendor/fog_defconfig # Must be edited
+DEFCONFIG=vendor/fog_defconfig # Must be edited
+TAG="[SCRIPT]"
 
-#Resukisu
-curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+export ARCH=arm64
+export SUBARCH=arm64
+export PATH="$(pwd)/toolchain/clang/bin:$PATH"
 
-#KSU ACTIVATION
-echo "CONFIG_KSU=y" >> $defconfig_path
+make -j$(nproc) O=out \
+	ARCH=arm64 \
+	CC=clang \
+	HOSTCC=gcc \
+	CROSS_COMPILE=aarch64-linux-gnu- \
+	CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+	AR=llvm-ar \
+	NM=llvm-nm \
+	OBJCOPY=llvm-objcopy \
+	OBJDUMP=llvm-objdump \
+	STRIP=llvm-strip \
+	$DEFCONFIG
 
-#MANUAL HOOK
-echo "CONFIG_KSU_MANUAL_HOOK=y" >> $defconfig_path
-wget https://raw.githubusercontent.com/xxblebleblexx/manual_hook_fix/refs/heads/main/resuki-4.19-cip-st.patch;wait;patch -p1 < resuki-4.19-cip-st.patch
-
-#Nomount driver
-curl -LSs "https://raw.githubusercontent.com/xxblebleblexx/nomount-installer/refs/heads/installer/nomount.sh" | bash -s 4.19
-
-make O=out ARCH=arm64 $defconfig; printf "n\n2\n\n\n\nY\n" | make -j$(nproc --all) CC=clang O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 LD=ld.lld AS=llvm-as AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump READELF=llvm-readelf STRIP=llvm-strip
+make -j$(nproc) O=out \
+	ARCH=arm64 \
+	CC=clang \
+	HOSTCC=gcc \
+	CROSS_COMPILE=aarch64-linux-gnu- \
+	CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+	AR=llvm-ar \
+	NM=llvm-nm \
+	OBJCOPY=llvm-objcopy \
+	OBJDUMP=llvm-objdump \
+	STRIP=llvm-strip &&
+	cat out/arch/arm64/boot/Image.gz out/arch/arm64/boot/dtb.img >out/arch/arm64/boot/Image.gz-dtb &&
+	echo "$TAG    out/arch/arm64/boot/Image.gz-dtb created successfully"
