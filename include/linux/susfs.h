@@ -217,7 +217,7 @@ void susfs_spoof_uname(struct new_utsname* tmp);
 
 /* enable_log */
 #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
-void susfs_enable_log(void __user **user_info);
+int susfs_enable_log(void __user **user_info);
 #endif
 
 /* spoof_cmdline_or_bootconfig */

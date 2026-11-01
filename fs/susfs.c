@@ -88,3 +88,85 @@ int susfs_show_version(void __user **user_info)
 	SUSFS_LOGI("CMD_SUSFS_SHOW_VERSION -> ret: %d\n", info.err);
 	return 0;
 }
+
+/* enable_log */
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+int susfs_enable_log(void __user **user_info)
+{
+	struct st_susfs_log info = {0};
+
+	if (copy_from_user(&info, (struct st_susfs_log __user *)*user_info, sizeof(info)))
+		return -EFAULT;
+
+	if (info.enabled) {
+		static_branch_enable(&susfs_is_log_enabled);
+		pr_info("susfs: enable logging to kernel\n");
+	} else {
+		static_branch_disable(&susfs_is_log_enabled);
+		pr_info("susfs: disable logging to kernel\n");
+	}
+
+	info.err = 0;
+	if (copy_to_user(&((struct st_susfs_log __user *)*user_info)->err, &info.err, sizeof(info.err)))
+		return -EFAULT;
+	SUSFS_LOGI("CMD_SUSFS_ENABLE_LOG -> ret: %d\n", info.err);
+	return 0;
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+
+/* show_enabled_features */
+#ifdef CONFIG_KSU_SUSFS_SHOW_ENABLED_FEATURES
+static int copy_config_to_buf(const char *config_string, char *buf_ptr,
+			      size_t *copied_size, size_t bufsize)
+{
+	size_t tmp_size = strlen(config_string);
+
+	*copied_size += tmp_size;
+	if (*copied_size >= bufsize) {
+		SUSFS_LOGE("bufsize is not big enough to hold the string.\n");
+		return -EINVAL;
+	}
+	memcpy(buf_ptr, config_string, tmp_size);
+	return 0;
+}
+
+void susfs_get_enabled_features(void __user **user_info)
+{
+	struct st_susfs_enabled_features *info;
+	char *buf_ptr;
+	size_t copied_size = 0;
+	int err = 0;
+
+	info = kzalloc(sizeof(*info), GFP_KERNEL);
+	if (!info) {
+		err = -ENOMEM;
+		if (copy_to_user(&((struct st_susfs_enabled_features __user *)*user_info)->err, &err, sizeof(err)))
+			err = -EFAULT;
+		SUSFS_LOGI("CMD_SUSFS_SHOW_ENABLED_FEATURES -> ret: %d\n", err);
+		return;
+	}
+
+	if (copy_from_user(info, (struct st_susfs_enabled_features __user *)*user_info, sizeof(*info))) {
+		info->err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	buf_ptr = info->enabled_features;
+
+#ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_ENABLE_LOG\n", buf_ptr,
+				       &copied_size, SUSFS_ENABLED_FEATURES_SIZE);
+	if (info->err)
+		goto out_copy_to_user;
+	buf_ptr = info->enabled_features + copied_size;
+#endif // #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
+
+	info->err = 0;
+out_copy_to_user:
+	if (copy_to_user((struct st_susfs_enabled_features __user *)*user_info, info, sizeof(*info))) {
+		info->err = -EFAULT;
+	}
+	SUSFS_LOGI("CMD_SUSFS_SHOW_ENABLED_FEATURES -> ret: %d\n", info->err);
+	kfree(info);
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_SHOW_ENABLED_FEATURES
