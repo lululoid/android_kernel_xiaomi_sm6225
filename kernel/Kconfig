@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# Kconfig include for main-tree KernelSU/SUSFS integration.
+# CONFIG_KSU is defined via drivers/Kconfig -> drivers/kernelsu/Kconfig
+# (symlink to KernelSU-Next/kernel/Kconfig).
+# CONFIG_KSU_SUSFS is defined in KernelSU-Next/kernel/Kconfig (shared via symlink).
+# This file is intentionally left empty to avoid duplicate symbol definitions
+# with the shared KernelSU-Next Kconfig when both trees build together.
