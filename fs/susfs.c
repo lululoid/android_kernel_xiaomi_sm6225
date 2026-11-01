@@ -44,6 +44,11 @@ DEFINE_STATIC_KEY_TRUE(susfs_is_log_enabled);
 
 /* susfs_extra_works - deferred extra susfs work after do_umount in ksu_handle_setresuid() */
 struct work_struct susfs_extra_works;
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+extern struct cred *ksu_cred;
+static void susfs_run_sus_path_loop(void);
+#endif
+
 static void susfs_run_extra_works(struct work_struct *work)
 {
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
@@ -161,6 +166,14 @@ void susfs_get_enabled_features(void __user **user_info)
 	buf_ptr = info->enabled_features + copied_size;
 #endif // #ifdef CONFIG_KSU_SUSFS_ENABLE_LOG
 
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_SUS_PATH\n", buf_ptr,
+				       &copied_size, SUSFS_ENABLED_FEATURES_SIZE);
+	if (info->err)
+		goto out_copy_to_user;
+	buf_ptr = info->enabled_features + copied_size;
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+
 	info->err = 0;
 out_copy_to_user:
 	if (copy_to_user((struct st_susfs_enabled_features __user *)*user_info, info, sizeof(*info))) {
@@ -170,3 +183,128 @@ out_copy_to_user:
 	kfree(info);
 }
 #endif // #ifdef CONFIG_KSU_SUSFS_SHOW_ENABLED_FEATURES
+
+/* sus_path */
+#ifdef CONFIG_KSU_SUSFS_SUS_PATH
+DEFINE_STATIC_SRCU(susfs_srcu_sus_path_loop);
+static DEFINE_MUTEX(susfs_mutex_lock_sus_path);
+static LIST_HEAD(LH_SUS_PATH_LOOP);
+const struct qstr susfs_fake_qstr_name = QSTR_INIT("..5.u.S", 7);
+
+void susfs_add_sus_path(void __user **user_info)
+{
+	struct st_susfs_sus_path info = {0};
+	struct path path;
+	struct inode *inode = NULL;
+
+	if (copy_from_user(&info, (struct st_susfs_sus_path __user *)*user_info, sizeof(info))) {
+		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	info.err = kern_path(info.target_pathname, LOOKUP_FOLLOW, &path);
+	if (info.err) {
+		SUSFS_LOGE("failed opening file '%s'\n", info.target_pathname);
+		goto out_copy_to_user;
+	}
+
+	inode = d_backing_inode(path.dentry);
+	if (!inode || !inode->i_mapping) {
+		SUSFS_LOGE("inode || inode->i_mapping is NULL\n");
+		info.err = -ENOENT;
+		goto out_path_put_path;
+	}
+
+	set_bit(AS_FLAGS_SUS_PATH, &inode->i_mapping->flags);
+	SUSFS_LOGI("flagged AS_FLAGS_SUS_PATH on pathname: '%s', ino: '%lu', inode->i_mapping->flags: 0x%lx\n",
+			info.target_pathname, inode->i_ino, inode->i_mapping->flags);
+	info.err = 0;
+out_path_put_path:
+	path_put(&path);
+out_copy_to_user:
+	if (copy_to_user(&((struct st_susfs_sus_path __user *)*user_info)->err, &info.err, sizeof(info.err))) {
+		info.err = -EFAULT;
+	}
+	SUSFS_LOGI("CMD_SUSFS_ADD_SUS_PATH -> ret: %d\n", info.err);
+}
+
+void susfs_add_sus_path_loop(void __user **user_info)
+{
+	struct st_susfs_sus_path_list *new_list = NULL;
+	struct st_susfs_sus_path info = {0};
+
+	if (copy_from_user(&info, (struct st_susfs_sus_path __user *)*user_info, sizeof(info))) {
+		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	if (*info.target_pathname == '\0') {
+		SUSFS_LOGE("target_pathname cannot be empty\n");
+		info.err = -EINVAL;
+		goto out_copy_to_user;
+	}
+
+	new_list = kzalloc(sizeof(struct st_susfs_sus_path_list), GFP_KERNEL);
+	if (!new_list) {
+		info.err = -ENOMEM;
+		goto out_copy_to_user;
+	}
+	strscpy(new_list->info.target_pathname, info.target_pathname, SUSFS_MAX_LEN_PATHNAME - 1);
+	strscpy(new_list->target_pathname, info.target_pathname, SUSFS_MAX_LEN_PATHNAME - 1);
+	INIT_LIST_HEAD(&new_list->list);
+	mutex_lock(&susfs_mutex_lock_sus_path);
+	list_add_tail_rcu(&new_list->list, &LH_SUS_PATH_LOOP);
+	mutex_unlock(&susfs_mutex_lock_sus_path);
+	SUSFS_LOGI("target_pathname: '%s', is successfully added to LH_SUS_PATH_LOOP\n", new_list->target_pathname);
+	info.err = 0;
+out_copy_to_user:
+	if (copy_to_user(&((struct st_susfs_sus_path __user *)*user_info)->err, &info.err, sizeof(info.err))) {
+		info.err = -EFAULT;
+	}
+	SUSFS_LOGI("CMD_SUSFS_ADD_SUS_PATH_LOOP -> ret: %d\n", info.err);
+}
+
+static void susfs_run_sus_path_loop(void)
+{
+	struct st_susfs_sus_path_list *cursor = NULL;
+	struct path path;
+	struct inode *inode;
+	const struct cred *saved = override_creds(ksu_cred);
+	int srcu_idx = srcu_read_lock(&susfs_srcu_sus_path_loop);
+
+	list_for_each_entry_rcu(cursor, &LH_SUS_PATH_LOOP, list) {
+		if (!kern_path(cursor->target_pathname, 0, &path)) {
+			inode = d_backing_inode(path.dentry);
+			if (inode && inode->i_mapping) {
+				set_bit(AS_FLAGS_SUS_PATH, &inode->i_mapping->flags);
+				SUSFS_LOGI("re-flag AS_FLAGS_SUS_PATH on path '%s', inode->i_ino: '%lu', inode->i_mapping->flags: 0x%lx\n",
+						cursor->target_pathname, inode->i_ino, inode->i_mapping->flags);
+			}
+			path_put(&path);
+		}
+	}
+	srcu_read_unlock(&susfs_srcu_sus_path_loop, srcu_idx);
+	revert_creds(saved);
+}
+
+static inline bool is_i_uid_not_allowed(uid_t i_uid) {
+	return likely(current_uid().val != i_uid);
+}
+
+bool susfs_is_inode_sus_path(struct inode *inode)
+{
+	if (!susfs_is_current_proc_umounted_app()) {
+		return false;
+	}
+	if (!inode->i_mapping) {
+		SUSFS_LOGE("inode->i_mapping is NULL\n");
+		return false;
+	}
+	if (unlikely(test_bit(AS_FLAGS_SUS_PATH, &inode->i_mapping->flags) &&
+		     is_i_uid_not_allowed(inode->i_uid.val))) {
+		SUSFS_LOGI("hiding path with ino '%lu'\n", inode->i_ino);
+		return true;
+	}
+	return false;
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
