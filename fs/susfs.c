@@ -363,6 +363,8 @@ out_copy_to_user:
 	if (copy_to_user(&((struct st_susfs_sus_mount __user *)*user_info)->err, &info.err, sizeof(info.err))) {
 		info.err = -EFAULT;
 	}
+	SUSFS_LOGI("set SUS_MOUNT on pathname: '%s', dev: '%lu' -> ret: %d\n",
+			info.target_pathname, info.target_dev, info.err);
 	SUSFS_LOGI("CMD_SUSFS_ADD_SUS_MOUNT -> ret: %d\n", info.err);
 }
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
