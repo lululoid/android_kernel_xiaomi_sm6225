@@ -190,6 +190,14 @@ void susfs_get_enabled_features(void __user **user_info)
 	buf_ptr = info->enabled_features + copied_size;
 #endif // #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
 
+#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_TRY_UMOUNT\n", buf_ptr,
+				       &copied_size, SUSFS_ENABLED_FEATURES_SIZE);
+	if (info->err)
+		goto out_copy_to_user;
+	buf_ptr = info->enabled_features + copied_size;
+#endif // #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+
 	info->err = 0;
 out_copy_to_user:
 	if (copy_to_user((struct st_susfs_enabled_features __user *)*user_info, info, sizeof(*info))) {
@@ -435,3 +443,25 @@ void susfs_spoof_uname(struct new_utsname* tmp)
 	} while (read_seqretry(&susfs_uname_seqlock, seq));
 }
 #endif // #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+
+/* deprecated: add_try_umount - kernel accepts command, actual umount is userspace-side */
+#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+void susfs_add_try_umount(void __user **user_info)
+{
+	struct st_susfs_try_umount info = {0};
+
+	if (copy_from_user(&info, (struct st_susfs_try_umount __user *)*user_info, sizeof(info))) {
+		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	info.err = 0;
+out_copy_to_user:
+	if (copy_to_user(&((struct st_susfs_try_umount __user *)*user_info)->err, &info.err, sizeof(info.err))) {
+		info.err = -EFAULT;
+	}
+	SUSFS_LOGI("add try_umount on pathname: '%s', mnt_mode: '%d' -> to LH_TRY_UMOUNT_PATH, ret: %d\n",
+			info.target_pathname, info.mnt_mode, info.err);
+	SUSFS_LOGI("CMD_SUSFS_ADD_TRY_UMOUNT -> ret: %d\n", info.err);
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
