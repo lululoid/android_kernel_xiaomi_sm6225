@@ -92,6 +92,10 @@
 #include <linux/susfs_def.h>
 extern int susfs_open_redirect_spoof_do_proc_readlink(struct inode *inode, char *tmp_buf, int buflen);
 #endif
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+#include <linux/susfs_def.h>
+extern bool susfs_is_inode_sus_map(struct inode *inode);
+#endif
 
 #include <linux/sched/autogroup.h>
 #include <linux/sched/mm.h>
@@ -2247,6 +2251,10 @@ proc_map_files_readdir(struct file *file, struct dir_context *ctx)
 				vma = vma->vm_next) {
 			if (!vma->vm_file)
 				continue;
+#ifdef CONFIG_KSU_SUSFS_SUS_MAP
+			if (SUSFS_IS_INODE_SUS_MAP(file_inode(vma->vm_file)))
+				continue;
+#endif
 			if (++pos <= ctx->pos)
 				continue;
 
