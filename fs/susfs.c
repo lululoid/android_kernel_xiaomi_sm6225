@@ -182,6 +182,14 @@ void susfs_get_enabled_features(void __user **user_info)
 	buf_ptr = info->enabled_features + copied_size;
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
 
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_SPOOF_UNAME\n", buf_ptr,
+				       &copied_size, SUSFS_ENABLED_FEATURES_SIZE);
+	if (info->err)
+		goto out_copy_to_user;
+	buf_ptr = info->enabled_features + copied_size;
+#endif // #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+
 	info->err = 0;
 out_copy_to_user:
 	if (copy_to_user((struct st_susfs_enabled_features __user *)*user_info, info, sizeof(*info))) {
@@ -368,3 +376,62 @@ out_copy_to_user:
 	SUSFS_LOGI("CMD_SUSFS_ADD_SUS_MOUNT -> ret: %d\n", info.err);
 }
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+
+/* spoof_uname */
+#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
+static struct st_susfs_uname my_uname = {0};
+DEFINE_STATIC_KEY_FALSE(susfs_is_uname_spoof_buffer_set);
+static DEFINE_SEQLOCK(susfs_uname_seqlock);
+
+void susfs_set_uname(void __user **user_info)
+{
+	struct st_susfs_uname info = {0};
+
+	if (copy_from_user(&info, (struct st_susfs_uname __user *)*user_info, sizeof(info))) {
+		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	if (*info.release == '\0' || *info.version == '\0') {
+		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	write_seqlock(&susfs_uname_seqlock);
+	if (!strcmp(info.release, "default")) {
+		strscpy(my_uname.release, utsname()->release, __NEW_UTS_LEN);
+	} else {
+		strscpy(my_uname.release, info.release, __NEW_UTS_LEN);
+	}
+	if (!strcmp(info.version, "default")) {
+		strscpy(my_uname.version, utsname()->version, __NEW_UTS_LEN);
+	} else {
+		strscpy(my_uname.version, info.version, __NEW_UTS_LEN);
+	}
+	write_sequnlock(&susfs_uname_seqlock);
+
+	if (!static_key_enabled(&susfs_is_uname_spoof_buffer_set))
+		static_branch_enable(&susfs_is_uname_spoof_buffer_set);
+
+	SUSFS_LOGI("set spoofed release: '%s', version: '%s'\n",
+			my_uname.release, my_uname.version);
+
+	info.err = 0;
+out_copy_to_user:
+	if (copy_to_user(&((struct st_susfs_uname __user *)*user_info)->err, &info.err, sizeof(info.err))) {
+		info.err = -EFAULT;
+	}
+	SUSFS_LOGI("CMD_SUSFS_SET_UNAME -> ret: %d\n", info.err);
+}
+
+void susfs_spoof_uname(struct new_utsname* tmp)
+{
+	unsigned seq;
+
+	do {
+		seq = read_seqbegin(&susfs_uname_seqlock);
+		strscpy(tmp->release, my_uname.release, __NEW_UTS_LEN);
+		strscpy(tmp->version, my_uname.version, __NEW_UTS_LEN);
+	} while (read_seqretry(&susfs_uname_seqlock, seq));
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
