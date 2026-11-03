@@ -16,6 +16,7 @@
 #define CMD_SUSFS_SET_SDCARD_ROOT_PATH 0x55552 /* deprecated */
 #define CMD_SUSFS_ADD_SUS_PATH_LOOP 0x55553
 #define CMD_SUSFS_ADD_SUS_MOUNT 0x55560 /* deprecated */
+#define CMD_SUSFS_HIDE_SUS_MNTS 0x55561  /* all_procs pre-v2, non_su_procs in v2 */
 #define CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS 0x55561
 #define CMD_SUSFS_UMOUNT_FOR_ZYGOTE_ISO_SERVICE 0x55562 /* deprecated */
 #define CMD_SUSFS_ADD_SUS_KSTAT 0x55570
@@ -41,7 +42,6 @@
 #define SUSFS_ENABLED_FEATURES_SIZE 8192 // 8192 is enough I guess
 #define SUSFS_MAX_VERSION_BUFSIZE 16
 #define SUSFS_MAX_VARIANT_BUFSIZE 16
-
 #define TRY_UMOUNT_DEFAULT 0 /* used by susfs_try_umount() */
 #define TRY_UMOUNT_DETACH 1 /* used by susfs_try_umount() */
 
@@ -175,4 +175,13 @@ static inline void susfs_clear_current_proc_no_su(void) {
 		inode && inode->i_mapping && \
 		unlikely(test_bit(AS_FLAGS_OPEN_REDIRECT, &inode->i_mapping->flags)) && \
 		susfs_is_current_proc_umounted_app()
+
+/* sus_mount */
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+struct st_susfs_sus_mount {
+	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+	unsigned long                           target_dev;
+	int                                     err;
+};
+#endif
 #endif // #ifndef KSU_SUSFS_DEF_H

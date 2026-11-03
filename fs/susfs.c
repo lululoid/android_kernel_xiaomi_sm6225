@@ -174,6 +174,14 @@ void susfs_get_enabled_features(void __user **user_info)
 	buf_ptr = info->enabled_features + copied_size;
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_SUS_MOUNT\n", buf_ptr,
+				       &copied_size, SUSFS_ENABLED_FEATURES_SIZE);
+	if (info->err)
+		goto out_copy_to_user;
+	buf_ptr = info->enabled_features + copied_size;
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+
 	info->err = 0;
 out_copy_to_user:
 	if (copy_to_user((struct st_susfs_enabled_features __user *)*user_info, info, sizeof(*info))) {
@@ -308,3 +316,53 @@ bool susfs_is_inode_sus_path(struct inode *inode)
 	return false;
 }
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+
+/* sus_mount */
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+DEFINE_STATIC_KEY_TRUE(susfs_is_sdcard_android_data_not_decrypted);
+DEFINE_STATIC_KEY_FALSE(susfs_is_hide_sus_mnts_for_non_su_procs_enabled);
+
+void susfs_set_hide_sus_mnts_for_non_su_procs(void __user **user_info)
+{
+	struct st_susfs_hide_sus_mnts_for_non_su_procs info = {0};
+
+	if (copy_from_user(&info, (struct st_susfs_hide_sus_mnts_for_non_su_procs __user *)*user_info, sizeof(info))) {
+		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	if (info.enabled) {
+		static_branch_enable(&susfs_is_hide_sus_mnts_for_non_su_procs_enabled);
+	} else {
+		static_branch_disable(&susfs_is_hide_sus_mnts_for_non_su_procs_enabled);
+	}
+
+	SUSFS_LOGI("susfs_is_hide_sus_mnts_for_non_su_procs_enabled: %d\n", static_key_enabled(&susfs_is_hide_sus_mnts_for_non_su_procs_enabled));
+	info.err = 0;
+out_copy_to_user:
+	if (copy_to_user(&((struct st_susfs_hide_sus_mnts_for_non_su_procs __user *)*user_info)->err, &info.err, sizeof(info.err))) {
+		info.err = -EFAULT;
+	}
+	SUSFS_LOGI("CMD_SUSFS_HIDE_SUS_MNTS_FOR_NON_SU_PROCS -> ret: %d\n", info.err);
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+
+/* deprecated: add_sus_mount - kernel auto-detects ksu-domain mounts */
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+void susfs_add_sus_mount(void __user **user_info)
+{
+	struct st_susfs_sus_mount info = {0};
+
+	if (copy_from_user(&info, (struct st_susfs_sus_mount __user *)*user_info, sizeof(info))) {
+		info.err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	info.err = 0;
+out_copy_to_user:
+	if (copy_to_user(&((struct st_susfs_sus_mount __user *)*user_info)->err, &info.err, sizeof(info.err))) {
+		info.err = -EFAULT;
+	}
+	SUSFS_LOGI("CMD_SUSFS_ADD_SUS_MOUNT -> ret: %d\n", info.err);
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
