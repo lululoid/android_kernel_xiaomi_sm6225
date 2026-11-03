@@ -206,6 +206,14 @@ void susfs_get_enabled_features(void __user **user_info)
 	buf_ptr = info->enabled_features + copied_size;
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 
+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+	info->err = copy_config_to_buf("CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG\n", buf_ptr,
+				       &copied_size, SUSFS_ENABLED_FEATURES_SIZE);
+	if (info->err)
+		goto out_copy_to_user;
+	buf_ptr = info->enabled_features + copied_size;
+#endif // #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+
 	info->err = 0;
 out_copy_to_user:
 	if (copy_to_user((struct st_susfs_enabled_features __user *)*user_info, info, sizeof(*info))) {
@@ -739,3 +747,83 @@ int susfs_sus_kstat_spoof_vfs_statfs(struct inode *inode, struct kstatfs *buf, b
 	return -ENOENT;
 }
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+
+/* spoof_cmdline_or_bootconfig */
+#ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
+static char *fake_cmdline_or_bootconfig = NULL;
+DEFINE_STATIC_KEY_FALSE(susfs_is_fake_cmdline_or_bootconfig_buffer_set);
+static DEFINE_SEQLOCK(susfs_fake_cmdline_or_bootconfig_seqlock);
+
+void susfs_set_cmdline_or_bootconfig(void __user **user_info)
+{
+	struct st_susfs_spoof_cmdline_or_bootconfig *info = NULL;
+	int err = 0;
+
+	info = kzalloc(sizeof(struct st_susfs_spoof_cmdline_or_bootconfig), GFP_KERNEL);
+	if (!info) {
+		err = -ENOMEM;
+		if (copy_to_user(&((struct st_susfs_spoof_cmdline_or_bootconfig __user *)*user_info)->err, &err, sizeof(err)))
+			err = -EFAULT;
+		SUSFS_LOGI("CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG -> ret: %d\n", err);
+		return;
+	}
+
+	if (copy_from_user(info, (struct st_susfs_spoof_cmdline_or_bootconfig __user *)*user_info, sizeof(struct st_susfs_spoof_cmdline_or_bootconfig))) {
+		info->err = -EFAULT;
+		goto out_copy_to_user;
+	}
+
+	if (*info->fake_cmdline_or_bootconfig == '\0') {
+		info->err = -EINVAL;
+		goto out_copy_to_user;
+	}
+
+	if (!fake_cmdline_or_bootconfig) {
+		fake_cmdline_or_bootconfig = kzalloc(SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE, GFP_KERNEL);
+		if (!fake_cmdline_or_bootconfig) {
+			info->err = -ENOMEM;
+			goto out_copy_to_user;
+		}
+	}
+
+	write_seqlock(&susfs_fake_cmdline_or_bootconfig_seqlock);
+	strscpy(fake_cmdline_or_bootconfig,
+		info->fake_cmdline_or_bootconfig,
+		SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE - 1);
+	write_sequnlock(&susfs_fake_cmdline_or_bootconfig_seqlock);
+
+	if (!static_key_enabled(&susfs_is_fake_cmdline_or_bootconfig_buffer_set))
+		static_branch_enable(&susfs_is_fake_cmdline_or_bootconfig_buffer_set);
+
+	SUSFS_LOGI("fake_cmdline_or_bootconfig is set\n");
+
+	info->err = 0;
+
+out_copy_to_user:
+	if (copy_to_user(&((struct st_susfs_spoof_cmdline_or_bootconfig __user *)*user_info)->err, &info->err, sizeof(info->err))) {
+		info->err = -EFAULT;
+	}
+	SUSFS_LOGI("CMD_SUSFS_SET_CMDLINE_OR_BOOTCONFIG -> ret: %d\n", info->err);
+	if (info) {
+		kfree(info);
+	}
+}
+
+void susfs_spoof_cmdline_or_bootconfig(struct seq_file *m)
+{
+	unsigned seq;
+	char *buf = kmalloc(SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE, GFP_KERNEL);
+
+	if (!buf) {
+		return;
+	}
+
+	do {
+		seq = read_seqbegin(&susfs_fake_cmdline_or_bootconfig_seqlock);
+		strscpy(buf, fake_cmdline_or_bootconfig, SUSFS_FAKE_CMDLINE_OR_BOOTCONFIG_SIZE);
+	} while (read_seqretry(&susfs_fake_cmdline_or_bootconfig_seqlock, seq));
+
+	seq_puts(m, buf);
+	kfree(buf);
+}
+#endif // #ifdef CONFIG_KSU_SUSFS_SPOOF_CMDLINE_OR_BOOTCONFIG
