@@ -184,4 +184,13 @@ struct st_susfs_sus_mount {
 	int                                     err;
 };
 #endif
+
+/* try_umount */
+#ifdef CONFIG_KSU_SUSFS_TRY_UMOUNT
+struct st_susfs_try_umount {
+	char                                    target_pathname[SUSFS_MAX_LEN_PATHNAME];
+	int                                     mnt_mode;
+	int                                     err;
+};
+#endif
 #endif // #ifndef KSU_SUSFS_DEF_H
