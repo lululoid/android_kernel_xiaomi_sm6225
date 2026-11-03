@@ -11,6 +11,11 @@
 #include <linux/compat.h>
 #include "internal.h"
 
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+extern bool susfs_is_inode_sus_kstat(struct inode *inode, bool *out_is_fuse);
+extern int susfs_sus_kstat_spoof_vfs_statfs(struct inode *inode, struct kstatfs *buf, bool *is_fuse);
+#endif
+
 static int flags_by_mnt(int mnt_flags)
 {
 	int flags = 0;
@@ -54,6 +59,12 @@ static int statfs_by_dentry(struct dentry *dentry, struct kstatfs *buf)
 {
 	int retval;
 
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+	bool is_fuse = false;
+	if (!susfs_sus_kstat_spoof_vfs_statfs(d_backing_inode(dentry), buf, &is_fuse))
+		return 0;
+#endif
+
 	if (!dentry->d_sb->s_op->statfs)
 		return -ENOSYS;
 
@@ -77,6 +88,17 @@ int vfs_statfs(const struct path *path, struct kstatfs *buf)
 	return error;
 }
 EXPORT_SYMBOL(vfs_statfs);
+
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+int statfs_by_dentry_wrapper(struct dentry *dentry, struct kstatfs *buf){
+	return statfs_by_dentry(dentry, buf);
+}
+
+int calculate_f_flags_wrapper(struct vfsmount *mnt)
+{
+	return calculate_f_flags(mnt);
+}
+#endif
 
 int user_statfs(const char __user *pathname, struct kstatfs *st)
 {

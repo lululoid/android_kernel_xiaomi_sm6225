@@ -215,10 +215,13 @@ void susfs_set_uname(void __user **user_info);
 void susfs_spoof_uname(struct new_utsname* tmp);
 #endif
 
-/* spoof_uname */
-#ifdef CONFIG_KSU_SUSFS_SPOOF_UNAME
-void susfs_set_uname(void __user **user_info);
-void susfs_spoof_uname(struct new_utsname* tmp);
+/* sus_kstat */
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+void susfs_add_sus_kstat(void __user **user_info);
+void susfs_update_sus_kstat(void __user **user_info);
+bool susfs_is_inode_sus_kstat(struct inode *inode, bool *out_is_fuse);
+void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *stat, u32 result_mask);
+int susfs_sus_kstat_spoof_vfs_statfs(struct inode *inode, struct kstatfs *buf, bool *is_fuse);
 #endif
 
 /* enable_log */
