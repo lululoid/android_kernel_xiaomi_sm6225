@@ -26,9 +26,9 @@ KSUSFS = "/data/adb/ksu/bin/ksu_susfs"
 
 
 def run_command(cmd, use_su=True, timeout=10):
-    """Run a shell command on the device, optionally wrapped in su -c."""
+    """Run a shell command on the device, optionally wrapped in sudo."""
     if use_su:
-        full_cmd = f"su -c '{cmd}'"
+        full_cmd = f"sudo {cmd}"
     else:
         full_cmd = cmd
 
