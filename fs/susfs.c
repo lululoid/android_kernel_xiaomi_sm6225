@@ -49,7 +49,7 @@ extern struct cred *ksu_cred;
 static void susfs_run_sus_path_loop(void);
 #endif
 
-static void susfs_run_extra_works(struct work_struct *work)
+void susfs_run_extra_works(struct work_struct *work)
 {
 #ifdef CONFIG_KSU_SUSFS_SUS_PATH
 	susfs_run_sus_path_loop();
