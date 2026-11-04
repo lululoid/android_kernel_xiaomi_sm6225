@@ -7,6 +7,7 @@
 #include <linux/version.h>
 #include <linux/cred.h>
 #include <linux/fs.h>
+#include <linux/mount.h>
 #include <linux/slab.h>
 #include <linux/seq_file.h>
 #include <linux/printk.h>
