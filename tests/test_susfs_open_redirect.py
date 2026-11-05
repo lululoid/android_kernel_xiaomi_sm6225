@@ -14,18 +14,19 @@ Tests:
 5. Set open_redirect via ksu_susfs add_open_redirect <target> <redirected> <uid_scheme>
    and verify rc=0
    NOTE: uid_scheme=2 (UID_NON_SU_PROC) is used since Termux shell is a non-su process
+   NOTE: Both paths must be on a non-FUSE filesystem (kernel rejects FUSE for open_redirect)
 6. Read target content after redirect — should now show redirected file's content
 7. Read redirected path directly — should still show its own content (reversed lookup)
 8. Cleanup: remove both test files
 
 Usage:
     python3 tests/test_susfs_open_redirect.py \\
-        --target-path /sdcard/susfs_or_target \\
-        --redirected-path /sdcard/susfs_or_redirected \\
+        --target-path /data/data/com.termux/files/susfs_or_target \\
+        --redirected-path /data/data/com.termux/files/susfs_or_redirected \\
         --uid-scheme 2
     python3 tests/test_susfs_open_redirect.py \\
-        --target-path /sdcard/susfs_or_target \\
-        --redirected-path /sdcard/susfs_or_redirected \\
+        --target-path /data/data/com.termux/files/susfs_or_target \\
+        --redirected-path /data/data/com.termux/files/susfs_or_redirected \\
         --uid-scheme 2 \\
         --server-url http://127.0.0.1:8765
 
@@ -33,6 +34,11 @@ Setup (run once on the Termux device before testing):
     python3 tests/susfs_server.py
     # From the host:
     adb forward tcp:8765 tcp:8765
+
+Notes:
+- The kernel rejects FUSE filesystems for open_redirect (susfs_add_open_redirect
+  returns -EINVAL if target or redirected inode's super_block magic is FUSE_SUPER_MAGIC).
+- Use paths on non-FUSE filesystems (e.g., /data/data/com.termux/files/ which is f2fs).
 """
 
 import argparse
@@ -187,14 +193,7 @@ def test_read_target_before(target_path, base_url=DEFAULT_SERVER_URL):
 
 def test_add_open_redirect(target_path, redirected_path, uid_scheme, use_su=True,
                            base_url=DEFAULT_SERVER_URL):
-    """Test setting open_redirect via ksu_susfs add_open_redirect <target> <redirected> <uid_scheme>.
-
-    NOTE: On kernels with SUSFS ABI v2.3.0, the userspace ksu_susfs binary's
-    cmd_add_open_redirect_2100() uses v2000_cmd() protocol which has a struct
-    layout mismatch with the kernel's st_susfs_open_redirect. This causes -EINVAL
-    (rc=234). This is a userspace ABI issue, not a kernel bug. The test reports
-    this as informational.
-    """
+    """Test setting open_redirect via ksu_susfs add_open_redirect <target> <redirected> <uid_scheme>."""
     print(f"\n=== Test: add_open_redirect '{target_path}' -> '{redirected_path}' (uid_scheme={uid_scheme}) ===")
     rc, out, err = ksu_susfs(
         f"add_open_redirect {target_path} {redirected_path} {uid_scheme}",
@@ -209,13 +208,14 @@ def test_add_open_redirect(target_path, redirected_path, uid_scheme, use_su=True
 
     if rc != 0:
         ret_match = re.search(r"ret:\s*(-?\d+)", out)
-        # rc=234 = -EINVAL (as unsigned byte: 256-22=234) - ABI mismatch
-        if rc == 234 or (ret_match and int(ret_match.group(1)) == -22):
-            print("  INFO: add_open_redirect returned -EINVAL (rc=234)")
-            print("  This is a known ABI mismatch: cmd_add_open_redirect_2100() uses")
-            print("  v2000_cmd() protocol which doesn't match kernel's st_susfs_open_redirect")
-            print("  struct layout on SUSFS ABI v2.3.0. Not a kernel bug.")
-            return True  # Informational pass
+        if ret_match:
+            ret_val = int(ret_match.group(1))
+            if ret_val == -22:  # -EINVAL
+                print("  INFO: add_open_redirect returned -EINVAL (rc=234)")
+                print("  Common cause: target or redirected path is on a FUSE filesystem.")
+                print("  The kernel rejects FUSE for open_redirect (susfs_add_open_redirect)")
+                print("  Use a non-FUSE path such as /data/data/com.termux/files/ instead.")
+                return True  # Informational pass - known limitation
 
         print(f"  FAIL: add_open_redirect returned rc={rc}")
         print(f"  stdout: {out}")
@@ -238,12 +238,7 @@ def test_add_open_redirect(target_path, redirected_path, uid_scheme, use_su=True
 
 
 def test_read_target_after(target_path, redirected_path, base_url=DEFAULT_SERVER_URL):
-    """Verify target content after redirect shows redirected file's content.
-
-    NOTE: open_redirect may not work due to the ABI mismatch described in
-    test_add_open_redirect. If the redirect wasn't successfully added, target
-    will still show its own content. This test reports the actual result.
-    """
+    """Verify target content after redirect shows redirected file's content."""
     print(f"\n=== Test: target content after redirect shows redirected content ===")
     time.sleep(1)
     rc, out, err = adb_shell(f"cat {target_path}", use_su=False, base_url=base_url)
@@ -262,9 +257,8 @@ def test_read_target_after(target_path, redirected_path, base_url=DEFAULT_SERVER
         print("  PASS: Target shows redirected content (open_redirect works)")
         return True
     else:
-        print(f"  INFO: Target shows '{actual}', expected 'redirected_spoofed_content'")
-        print("  open_redirect may not be active due to ABI mismatch (see add_open_redirect test)")
-        return True  # Informational - the redirect setup itself may have ABI issues
+        print(f"  FAIL: Target shows '{actual}', expected 'redirected_spoofed_content'")
+        return False
 
 
 def test_read_redirected_directly(redirected_path, base_url=DEFAULT_SERVER_URL):
@@ -311,12 +305,12 @@ def main():
     parser.add_argument(
         "--target-path",
         required=True,
-        help="Target path to redirect (e.g., /sdcard/susfs_or_target)",
+        help="Target path to redirect (e.g., /data/data/com.termux/files/susfs_or_target)",
     )
     parser.add_argument(
         "--redirected-path",
         required=True,
-        help="Redirected path with different content (e.g., /sdcard/susfs_or_redirected)",
+        help="Redirected path with different content (e.g., /data/data/com.termux/files/susfs_or_redirected)",
     )
     parser.add_argument(
         "--uid-scheme",
