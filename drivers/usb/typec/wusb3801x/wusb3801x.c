@@ -34,6 +34,7 @@
 #include <linux/power_supply.h>
 #include <linux/irq.h>
 #include <linux/delay.h>
+#include <linux/phy/phy.h>
 #include <linux/pm_wakeup.h>
 #ifndef __WITH_KERNEL_VER4__
 #include <linux/wakelock.h>
@@ -442,6 +443,8 @@ typedef struct wusb3801_chip
 	uint8_t     dfp_power;
 	uint8_t     dttime;
 	uint8_t     attached;
+	unsigned long last_state_change;	// debounce: last state change time (jiffies)
+	unsigned long last_error_recovery;	// cooldown: last ERROR_RECOVERY entry time (jiffies)
 	uint8_t     init_state;
 	uint8_t     defer_init;	//work round the additional interrupt caused by mode change 
 	int         try_attcnt;
@@ -453,6 +456,7 @@ typedef struct wusb3801_chip
 #endif /* __WITH_KERNEL_VER4__ */	
 	struct      mutex mlock;
 	struct      power_supply *usb_psy;
+	struct      phy *usb_phy;
 	struct      dual_role_phy_instance *dual_role;
 	struct      dual_role_phy_desc *desc;
 #ifdef 	__QCOM_PLATFORM__
@@ -1771,6 +1775,10 @@ static void wusb3801_snk_detected(struct wusb3801_chip *chip)
 		//power_supply_set_usb_otg(chip->usb_psy, true);
 #endif /*__MEDIATEK_PLATFORM__*/
 		wusb3801_set_dfp_power(chip, chip->pdata->dfp_power);
+		if (chip->usb_phy && !IS_ERR(chip->usb_phy)) {
+			if (phy_power_on(chip->usb_phy))
+				dev_err(cdev, "%s: failed to enable usb phy\n", __func__);
+		}
 		wusb3801_update_state(chip, WUSB3801_STATE_ATTACHED_SRC);
 #if defined(__MEDIATEK_PLATFORM__)
     mediatek_set_charger(1);
@@ -1901,6 +1909,7 @@ static void wusb3801_detach(struct wusb3801_chip *chip)
 		chip->defer_init = 0;
 	}
 	wusb3801_update_state(chip, WUSB3801_STATE_ERROR_RECOVERY);
+	chip->last_error_recovery = jiffies;	// cooldown start: reject ATTACH for 2s
 #if !defined(__MEDIATEK_PLATFORM__)
 	dual_role_instance_changed(chip->dual_role);
 #endif /*__MEDIATEK_PLATFORM__*/
@@ -2138,15 +2147,28 @@ static void wusb3801_work_handler(struct work_struct *work)
 	dev_info(cdev,"%s WUSB3801_REG_STATUS : 0x%02x\n", __func__, rc);
 	
 	dev_info(cdev, "%s: int_sts[0x%02x]\n", __func__, int_sts);
+	/* debounce: ignore interrupts within 100ms of last state change
+	 * to filter out PHY power-transient induced spurious attach/detach */
+	if (time_before(jiffies, chip->last_state_change + msecs_to_jiffies(100))) {
+		dev_info(cdev, "%s: debounce, skip IRQ within 100ms of last state change\n", __func__);
+		goto work_unlock;
+	}
 	if (int_sts & WUSB3801_INT_DETACH){
 		wusb3801_detach(chip);
+		chip->last_state_change = jiffies;
 	}
 	if (int_sts & WUSB3801_INT_ATTACH){
-		if(chip->attached){
+		/* cooldown: reject ATTACH within 2000ms of ERROR_RECOVERY
+		 * to prevent rapid attach/detach oscillation after real disconnect */
+		if (time_before(jiffies, chip->last_error_recovery + msecs_to_jiffies(2000))) {
+			dev_info(cdev, "%s: cooldown, skip ATTACH within 2000ms of last ERROR_RECOVERY\n", __func__);
+		}
+		else if(chip->attached){
 			wusb3801_bclvl_changed(chip);
 		}
 		else{
 			wusb3801_attach(chip);
+			chip->last_state_change = jiffies;
 		}
 	}
 	propval.intval = get_cc_status(chip);
@@ -2740,6 +2762,13 @@ static int wusb3801_probe(struct i2c_client *client,
 	chip->client = client;
 	i2c_set_clientdata(client, chip);
 
+	chip->usb_phy = devm_of_phy_get_by_index(&client->dev,
+						 client->dev.of_node, 0);
+	if (IS_ERR(chip->usb_phy)) {
+		dev_err(cdev, "failed to get usb phy, %ld\n", PTR_ERR(chip->usb_phy));
+		chip->usb_phy = NULL;
+	}
+
 	ret = wusb3801_read_device_id(chip);
 	if (ret){
 		dev_err(cdev, "wusb3801 doesn't find, try again\n");
@@ -2781,6 +2810,8 @@ static int wusb3801_probe(struct i2c_client *client,
 	chip->type      = WUSB3801_TYPE_INVALID;
 	chip->state     = WUSB3801_STATE_ERROR_RECOVERY;
 	chip->attached  = 0;
+	chip->last_state_change = jiffies - msecs_to_jiffies(200);	// debounce: first IRQ always passes
+	chip->last_error_recovery = jiffies - msecs_to_jiffies(3000);	// cooldown: first ATTACH always passes
 	chip->bc_lvl    = WUSB3801_SNK_0MA;
 	chip->ufp_power = 0;
 	chip->defer_init = 0;	// Do the mode init when chip init
@@ -3070,6 +3101,7 @@ static struct of_device_id wusb3801_match_table[] = {
 	{ .compatible = "mediatek,wusb3801x",},
 #else /*__MEDIATEK_PLATFORM__*/
 	{ .compatible = "qcom,wusb3801x",},
+	{ .compatible = "WillSemi,wusb3801",},
 #endif /*__MEDIATEK_PLATFORM__*/
 	{ },
 };

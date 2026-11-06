@@ -134,6 +134,7 @@
 				wusb3801,init-mode = <0x24>;
 				wusb3801,host-current = <0x02>;
 				wusb3801,drp-toggle-time = <0x28>;
+				phy = <&usb2_phy0>;
 			};
 
 			fusb303@21 {
