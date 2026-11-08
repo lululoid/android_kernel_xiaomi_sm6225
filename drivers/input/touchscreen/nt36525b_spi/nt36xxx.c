@@ -27,6 +27,7 @@
 #include <linux/of_gpio.h>
 #include <linux/of_irq.h>
 #include <linux/pm_runtime.h>
+#include <linux/jiffies.h>
 
 #if defined(CONFIG_FB)
 #if defined(CONFIG_DRM_PANEL)
@@ -135,6 +136,13 @@ const uint16_t gesture_key_array[] = {
 #endif
 
 static uint8_t bTouchIsAwake = 0;
+
+/* Debounce guard against rapid suspend/resume cycles (e.g. triggered by
+ * WiFi IRQ). SPI hangs in this kernel so spi_geni_master_dev is intentionally
+ * left NULL; the only safe way to decouple the WiFi IRQ trigger is to ignore
+ * suspend/resume requests that arrive too close together. */
+static unsigned long last_suspend_jiffies = 0;
+#define NVT_SUSPEND_MIN_INTERVAL    msecs_to_jiffies(1000)   /* 1s between suspends */
 
 #if WAKEUP_GESTURE
 #define WAKEUP_OFF 4
@@ -1430,6 +1438,7 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
    if (nvt_wdt_fw_recovery(point_data)) {
        NVT_ERR("Recover for fw reset, %02X\n", point_data[1]);
        nvt_update_firmware(BOOT_UPDATE_FIRMWARE_NAME);
+       msleep(50);
        goto XFER_ERROR;
    }
 #endif /* #if NVT_TOUCH_WDT_RECOVERY */
@@ -2355,6 +2364,13 @@ static int32_t nvt_ts_suspend(struct device *dev)
 		NVT_LOG("Touch is already suspend\n");
 		return 0;
 	}
+
+	/* Debounce: ignore rapid suspend requests triggered by WiFi IRQ */
+	if (time_before(jiffies, last_suspend_jiffies + NVT_SUSPEND_MIN_INTERVAL)) {
+		NVT_LOG("ignore rapid suspend request\n");
+		return 0;
+	}
+	last_suspend_jiffies = jiffies;
 
 #if WAKEUP_GESTURE
     set_lcd_reset_gpio_keep_high(true);
