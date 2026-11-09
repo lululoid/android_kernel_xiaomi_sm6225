@@ -12,7 +12,20 @@ ksu_clean() {
 	local is_ksu=$(grep -Eo 'CONFIG_KSU_SUSFS=[yn]$$' arch/arm64/configs/vendor/fog_defconfig | cut -d'=' -f2)
 
 	if [ "$is_ksu" == "y" ]; then
-		make -j$(nproc) O=out ARCH=arm64 CC=clang HOSTCC=gcc CROSS_COMPILE=aarch64-linux-gnu- CROSS_COMPILE_ARM32=arm-linux-gnueabi- AR=llvm-ar NM=llvm-nm OBJCOPY=llvm-objcopy OBJDUMP=llvm-objdump STRIP=llvm-strip M=drivers/kernelsu clean HAVE_KSU_HOOK=0 &&
+		make -j$(nproc) O=out \
+			ARCH=arm64 \
+			CC=clang \
+			HOSTCC=gcc \
+			CROSS_COMPILE=aarch64-linux-gnu- \
+			CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+			AR=llvm-ar \
+			NM=llvm-nm \
+			OBJCOPY=llvm-objcopy \
+			OBJDUMP=llvm-objdump \
+			STRIP=llvm-strip \
+			HAVE_KSU_HOOK=0 \
+			M=drivers/kernelsu \
+			clean &&
 			echo "  $TAG    KernelSU clean successful"
 	fi
 }
