@@ -943,6 +943,19 @@ static int __hdd_netdev_notifier_call(struct net_device *net_dev,
 		return NOTIFY_DONE;
 	}
 
+	/* Verify this net_device actually belongs to qcacld.
+	 * Other drivers (e.g. mt7601u) also name their interfaces "wlan*" and
+	 * set ieee80211_ptr, so they pass the guards above. Their netdev_priv
+	 * is not a qcacld hdd_adapter and must not be dereferenced as one.
+	 * On disconnect the private data may already be freed (LIST_POISON),
+	 * causing a kernel oops at the adapter dereference below.
+	 */
+	if (adapter->magic != WLAN_HDD_ADAPTER_MAGIC) {
+		hdd_err("%s: magic mismatch, ignoring non-qcacld dev %s",
+			__func__, net_dev->name);
+		return NOTIFY_DONE;
+	}
+
 	if (adapter != WLAN_HDD_GET_PRIV_PTR(net_dev)) {
 		hdd_err("HDD adapter mismatch!");
 		return NOTIFY_DONE;
