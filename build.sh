@@ -84,7 +84,6 @@ make -j$(nproc) O=out \
 	STRIP=llvm-strip
 
 if [ $? -eq 0 ]; then
-	cat out/arch/arm64/boot/Image.gz out/arch/arm64/boot/dtb.img >out/arch/arm64/boot/Image.gz-dtb &&
-		echo "  $TAG    out/arch/arm64/boot/Image.gz-dtb created successfully"
+	[ -f out/arch/arm64/boot/Image.gz-dtb ] && echo "  $TAG    out/arch/arm64/boot/Image.gz-dtb created successfully"
 	notify-send "Kernel compile done" "make finished at $(date +%T)" 2>/dev/null && paplay /usr/share/sounds/freedesktop/stereo/complete.oga &
 fi
