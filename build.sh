@@ -47,6 +47,12 @@ while [[ $# -gt 0 ]]; do
 		esac
 		shift 2
 		;;
+	--defconfig | -dc)
+		[ -z "$2" ] && echo "  $TAG    Missing argument for --defconfig" && exit 1
+		DEFCONFIG=$2
+		echo "  $TAG    Defconfig set to: $DEFCONFIG"
+		shift 2
+		;;
 	*)
 		echo "  $TAG    Unknown option: $1"
 		exit 1
